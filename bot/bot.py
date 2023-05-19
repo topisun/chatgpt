@@ -8,6 +8,10 @@ import tempfile
 import pydub
 from pathlib import Path
 from datetime import datetime
+from functools import wraps
+from telegram import Update
+from telegram.ext import CallbackContext
+from telegram.error import BadRequest
 import openai
 
 import telegram
@@ -67,11 +71,41 @@ For example: "{bot_username} write a poem about Telegram"
 """
 
 
+ALLOWED_GROUPS = config.allowed_group_ids
+
+
+def restrict_to_allowed_groups(func):
+    @wraps(func)
+    async def wrapper(update: Update, context: CallbackContext, *args, **kwargs):
+        user_id = update.effective_user.id
+        is_allowed = False
+
+        for group_id in ALLOWED_GROUPS:
+            try:
+                member = await context.bot.get_chat_member(chat_id=group_id, user_id=user_id)
+                if member.status not in ['left', 'kicked']:
+                    is_allowed = True
+                    break
+            
+            except BadRequest:
+                pass
+                # await update.message.reply_text(f"BadRequest user_id={user_id} group_id={group_id}", parse_mode=ParseMode.HTML)
+
+        if is_allowed or not ALLOWED_GROUPS:
+            # await update.message.reply_text("Красава, ты в группе!", parse_mode=ParseMode.HTML)
+            return await func(update, context, *args, **kwargs)
+        else:
+            await update.message.reply_text("You are not allowed to use the bot", parse_mode=ParseMode.HTML)
+    return wrapper
+
+
+
+
 def split_text_into_chunks(text, chunk_size):
     for i in range(0, len(text), chunk_size):
         yield text[i:i + chunk_size]
 
-
+@restrict_to_allowed_groups
 async def register_user_if_not_exists(update: Update, context: CallbackContext, user: User):
     if not db.check_if_user_exists(user.id):
         db.add_new_user(
@@ -112,6 +146,7 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
         db.set_user_attribute(user.id, "n_generated_images", 0)
 
 
+@restrict_to_allowed_groups
 async def is_bot_mentioned(update: Update, context: CallbackContext):
      try:
          message = update.message
@@ -131,6 +166,7 @@ async def is_bot_mentioned(update: Update, context: CallbackContext):
          return False
 
 
+@restrict_to_allowed_groups
 async def start_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     user_id = update.message.from_user.id
@@ -145,6 +181,7 @@ async def start_handle(update: Update, context: CallbackContext):
     await show_chat_modes_handle(update, context)
 
 
+@restrict_to_allowed_groups
 async def help_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     user_id = update.message.from_user.id
@@ -152,6 +189,7 @@ async def help_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(HELP_MESSAGE, parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def help_group_chat_handle(update: Update, context: CallbackContext):
      await register_user_if_not_exists(update, context, update.message.from_user)
      user_id = update.message.from_user.id
@@ -163,6 +201,7 @@ async def help_group_chat_handle(update: Update, context: CallbackContext):
      await update.message.reply_video(config.help_group_chat_video_path)
 
 
+@restrict_to_allowed_groups
 async def retry_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -181,6 +220,7 @@ async def retry_handle(update: Update, context: CallbackContext):
     await message_handle(update, context, message=last_dialog_message["user"], use_new_dialog_timeout=False)
 
 
+@restrict_to_allowed_groups
 async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
@@ -317,6 +357,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 del user_tasks[user_id]
 
 
+@restrict_to_allowed_groups
 async def is_previous_message_not_answered_yet(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
 
@@ -330,6 +371,7 @@ async def is_previous_message_not_answered_yet(update: Update, context: Callback
         return False
 
 
+@restrict_to_allowed_groups
 async def voice_message_handle(update: Update, context: CallbackContext):
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
@@ -370,6 +412,7 @@ async def voice_message_handle(update: Update, context: CallbackContext):
     await message_handle(update, context, message=transcribed_text)
 
 
+@restrict_to_allowed_groups
 async def generate_image_handle(update: Update, context: CallbackContext, message=None):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -399,6 +442,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
         await update.message.reply_photo(image_url, parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def new_dialog_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -413,6 +457,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def cancel_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
 
@@ -426,6 +471,7 @@ async def cancel_handle(update: Update, context: CallbackContext):
         await update.message.reply_text("<i>Nothing to cancel...</i>", parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 def get_chat_mode_menu(page_index: int):
     n_chat_modes_per_page = config.n_chat_modes_per_page
     text = f"Select <b>chat mode</b> ({len(config.chat_modes)} modes available):"
@@ -463,6 +509,7 @@ def get_chat_mode_menu(page_index: int):
     return text, reply_markup
 
 
+@restrict_to_allowed_groups
 async def show_chat_modes_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -474,6 +521,7 @@ async def show_chat_modes_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def show_chat_modes_callback_handle(update: Update, context: CallbackContext):
      await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
      if await is_previous_message_not_answered_yet(update.callback_query, context): return
@@ -496,6 +544,7 @@ async def show_chat_modes_callback_handle(update: Update, context: CallbackConte
              pass
 
 
+@restrict_to_allowed_groups
 async def set_chat_mode_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
     user_id = update.callback_query.from_user.id
@@ -541,6 +590,7 @@ def get_settings_menu(user_id: int):
     return text, reply_markup
 
 
+@restrict_to_allowed_groups
 async def settings_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -552,6 +602,7 @@ async def settings_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def set_settings_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
     user_id = update.callback_query.from_user.id
@@ -571,6 +622,7 @@ async def set_settings_handle(update: Update, context: CallbackContext):
             pass
 
 
+@restrict_to_allowed_groups
 async def show_balance_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
 
@@ -618,12 +670,14 @@ async def show_balance_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def edited_message_handle(update: Update, context: CallbackContext):
     if update.edited_message.chat.type == "private":
         text = "🥲 Unfortunately, message <b>editing</b> is not supported"
         await update.edited_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+@restrict_to_allowed_groups
 async def error_handle(update: Update, context: CallbackContext) -> None:
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
