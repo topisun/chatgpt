@@ -108,11 +108,14 @@ def is_user_in_allowed_groups(user_id):
 
 class IsUserInAllowedGroupsFilter(BaseFilter):
     def check_update(self, update):
+        # return True
         user_id = update.message.from_user.id
         return is_user_in_allowed_groups(user_id)
 
     def filter(self, message):
         return False
+        # user_id = message.from_user.id
+        # return is_user_in_allowed_groups(user_id)
 
 
 # class IsUserInAllowedGroupsFilter(BaseFilter):
@@ -753,7 +756,7 @@ def run_bot() -> None:
         user_ids = [x for x in config.allowed_telegram_usernames if isinstance(x, int)]
         user_filter = filters.User(username=usernames) | filters.User(user_id=user_ids)
 
-    custom_filter = filters.ChatType.PRIVATE & user_filter & is_user_in_allowed_groups_filter
+    custom_filter = filters.ChatType.PRIVATE & is_user_in_allowed_groups_filter
 
     application.add_handler(CommandHandler("start", start_handle, filters=custom_filter))
     application.add_handler(CommandHandler("help", help_handle, filters=custom_filter))
