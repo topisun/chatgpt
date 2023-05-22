@@ -136,3 +136,7 @@ config/config.env
 docker-compose.dev.yml
 
 mongodb/
+
+# temp files and vs code filse
+.temp/
+*vscode*
