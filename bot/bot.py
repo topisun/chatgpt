@@ -71,6 +71,17 @@ def split_text_into_chunks(text, chunk_size):
     for i in range(0, len(text), chunk_size):
         yield text[i:i + chunk_size]
 
+async def is_user_in_allowed_groups(context: CallbackContext, user_id: int):
+    allowed_groups = config.allowed_groups  # add this to your config
+    for group_id in allowed_groups:
+        try:
+            member = await context.bot.get_chat_member(chat_id=group_id, user_id=user_id)
+            if member.status not in ["left", "kicked"]:
+                return True
+        except Exception as e:
+            print(f"Failed to get chat member: {e}")
+    return False
+
 
 async def register_user_if_not_exists(update: Update, context: CallbackContext, user: User):
     if not db.check_if_user_exists(user.id):
@@ -132,9 +143,14 @@ async def is_bot_mentioned(update: Update, context: CallbackContext):
 
 
 async def start_handle(update: Update, context: CallbackContext):
-    await register_user_if_not_exists(update, context, update.message.from_user)
-    user_id = update.message.from_user.id
 
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
     db.start_new_dialog(user_id)
 
@@ -146,28 +162,39 @@ async def start_handle(update: Update, context: CallbackContext):
 
 
 async def help_handle(update: Update, context: CallbackContext):
-    await register_user_if_not_exists(update, context, update.message.from_user)
     user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+    await register_user_if_not_exists(update, context, update.message.from_user)
+
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
     await update.message.reply_text(HELP_MESSAGE, parse_mode=ParseMode.HTML)
 
 
 async def help_group_chat_handle(update: Update, context: CallbackContext):
-     await register_user_if_not_exists(update, context, update.message.from_user)
-     user_id = update.message.from_user.id
-     db.set_user_attribute(user_id, "last_interaction", datetime.now())
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+    await register_user_if_not_exists(update, context, update.message.from_user)
 
-     text = HELP_GROUP_CHAT_MESSAGE.format(bot_username="@" + context.bot.username)
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-     await update.message.reply_video(config.help_group_chat_video_path)
+    text = HELP_GROUP_CHAT_MESSAGE.format(bot_username="@" + context.bot.username)
+
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    await update.message.reply_video(config.help_group_chat_video_path)
 
 
 async def retry_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
@@ -182,6 +209,10 @@ async def retry_handle(update: Update, context: CallbackContext):
 
 
 async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
         return
@@ -331,6 +362,10 @@ async def is_previous_message_not_answered_yet(update: Update, context: Callback
 
 
 async def voice_message_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
         return
@@ -371,10 +406,13 @@ async def voice_message_handle(update: Update, context: CallbackContext):
 
 
 async def generate_image_handle(update: Update, context: CallbackContext, message=None):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     await update.message.chat.send_action(action="upload_photo")
@@ -400,10 +438,13 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
 
 
 async def new_dialog_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     db.start_new_dialog(user_id)
@@ -414,9 +455,12 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
 
 
 async def cancel_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     if user_id in user_tasks:
@@ -464,10 +508,13 @@ def get_chat_mode_menu(page_index: int):
 
 
 async def show_chat_modes_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     text, reply_markup = get_chat_mode_menu(0)
@@ -475,30 +522,36 @@ async def show_chat_modes_handle(update: Update, context: CallbackContext):
 
 
 async def show_chat_modes_callback_handle(update: Update, context: CallbackContext):
-     await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-     if await is_previous_message_not_answered_yet(update.callback_query, context): return
+    user_id = update.callback_query.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+    if await is_previous_message_not_answered_yet(update.callback_query, context): return
 
-     user_id = update.callback_query.from_user.id
-     db.set_user_attribute(user_id, "last_interaction", datetime.now())
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-     query = update.callback_query
-     await query.answer()
+    query = update.callback_query
+    await query.answer()
 
-     page_index = int(query.data.split("|")[1])
-     if page_index < 0:
-         return
+    page_index = int(query.data.split("|")[1])
+    if page_index < 0:
+        return
 
-     text, reply_markup = get_chat_mode_menu(page_index)
-     try:
-         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-     except telegram.error.BadRequest as e:
-         if str(e).startswith("Message is not modified"):
-             pass
+    text, reply_markup = get_chat_mode_menu(page_index)
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    except telegram.error.BadRequest as e:
+        if str(e).startswith("Message is not modified"):
+            pass
 
 
 async def set_chat_mode_handle(update: Update, context: CallbackContext):
-    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
     user_id = update.callback_query.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
 
     query = update.callback_query
     await query.answer()
@@ -542,10 +595,13 @@ def get_settings_menu(user_id: int):
 
 
 async def settings_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     text, reply_markup = get_settings_menu(user_id)
@@ -553,8 +609,11 @@ async def settings_handle(update: Update, context: CallbackContext):
 
 
 async def set_settings_handle(update: Update, context: CallbackContext):
-    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
     user_id = update.callback_query.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
 
     query = update.callback_query
     await query.answer()
@@ -572,9 +631,12 @@ async def set_settings_handle(update: Update, context: CallbackContext):
 
 
 async def show_balance_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     await register_user_if_not_exists(update, context, update.message.from_user)
 
-    user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     # count total usage statistics
@@ -619,6 +681,10 @@ async def show_balance_handle(update: Update, context: CallbackContext):
 
 
 async def edited_message_handle(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
     if update.edited_message.chat.type == "private":
         text = "🥲 Unfortunately, message <b>editing</b> is not supported"
         await update.edited_message.reply_text(text, parse_mode=ParseMode.HTML)
