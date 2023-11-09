@@ -1,4 +1,4 @@
-available_text_models: ["gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-4", "text-davinci-003"]
+available_text_models: ["gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-4", "gpt-4-1106-preview"]
 
 info:
   gpt-3.5-turbo:
@@ -39,6 +39,19 @@ info:
       Smart: 5
       Fast: 2
       Cheap: 2
+
+  gpt-4-1106-preview:
+    type: chat_completion
+    name: GPT-4T
+    description: GPT-4 Turbo is the smartest and newest model in the world.
+
+    price_per_1000_input_tokens: 0.03
+    price_per_1000_output_tokens: 0.06
+
+    scores:
+      Smart: 5
+      Fast: 3
+      Cheap: 3
 
   text-davinci-003:
     type: completion
