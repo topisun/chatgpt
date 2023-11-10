@@ -5,6 +5,9 @@ services:
     container_name: mongo
     image: mongo:latest
     restart: always
+    # ports:
+    # - "${MONGO_EXPRESS_PORT:-8085}:${MONGO_EXPRESS_PORT:-8081}"
+
     ports:
       - 127.0.0.1:${MONGODB_PORT:-27017}:${MONGODB_PORT:-27017}
     volumes:
