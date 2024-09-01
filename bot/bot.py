@@ -490,8 +490,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
     async with user_semaphores[user_id]:
-        if current_model == "gpt-4-vision-preview" or current_model == "gpt-4o" or update.message.photo is not None and len(update.message.photo) > 0:
-
+        # if current_model == "gpt-4-vision-preview" or current_model == "gpt-4o" or update.message.photo is not None and len(update.message.photo) > 0:
+        if (current_model == "gpt-4-vision-preview" or current_model == "gpt-4o") and update.message.photo is not None and len(update.message.photo) > 0:
             logger.error(current_model)
             # What is this? ^^^
 
@@ -607,7 +607,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     if await is_previous_message_not_answered_yet(update, context): return
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.set_user_attribute(user_id, "current_model", "gpt-3.5-turbo")
+    db.set_user_attribute(user_id, "current_model", "gpt-4o")
 
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
