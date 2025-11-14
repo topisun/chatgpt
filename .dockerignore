@@ -1,2 +1,45 @@
-mongodb
-  
+# MongoDB данные
+mongodb/
+mongodb_bu/
+data/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose*.yml
+
+# Documentation
+README.md
+LICENSE
+*.md
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Logs
+*.log
