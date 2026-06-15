@@ -30,6 +30,7 @@ from telegram.constants import ParseMode, ChatAction
 import config
 import database
 import openai_utils
+import telegram_format
 
 import base64
 
@@ -212,9 +213,9 @@ async def _vision_message_handle_fn(
     user_id = update.message.from_user.id
     current_model = db.get_user_attribute(user_id, "current_model")
 
-    if current_model != "gpt-4-vision-preview" and current_model != "gpt-4o":
+    if not openai_utils.is_vision_model(current_model):
         await update.message.reply_text(
-            "🥲 Images processing is only available for <b>gpt-4-vision-preview</b> and <b>gpt-4o</b> model. Please change your settings in /settings",
+            "🥲 Images processing is only available for vision-capable models (<b>GPT-5.x</b> and <b>gpt-4o</b>). Please change your settings in /settings",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -251,9 +252,8 @@ async def _vision_message_handle_fn(
         await update.message.chat.send_action(action="typing")
 
         dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
-        parse_mode = {"html": ParseMode.HTML, "markdown": ParseMode.MARKDOWN}[
-            config.chat_modes[chat_mode]["parse_mode"]
-        ]
+        # model replies in Markdown; render it to Telegram MarkdownV2 before sending
+        parse_mode = ParseMode.MARKDOWN_V2
 
         chatgpt_instance = openai_utils.ChatGPT(model=current_model)
         if config.enable_message_streaming:
@@ -300,7 +300,7 @@ async def _vision_message_handle_fn(
 
             try:
                 await context.bot.edit_message_text(
-                    answer,
+                    telegram_format.render(answer),
                     chat_id=placeholder_message.chat_id,
                     message_id=placeholder_message.message_id,
                     parse_mode=parse_mode,
@@ -416,10 +416,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                  return
 
             dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
-            parse_mode = {
-                "html": ParseMode.HTML,
-                "markdown": ParseMode.MARKDOWN
-            }[config.chat_modes[chat_mode]["parse_mode"]]
+            # model replies in Markdown; render it to Telegram MarkdownV2 before sending
+            parse_mode = ParseMode.MARKDOWN_V2
 
             chatgpt_instance = openai_utils.ChatGPT(model=current_model)
             if config.enable_message_streaming:
@@ -448,7 +446,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                     continue
 
                 try:
-                    await context.bot.edit_message_text(answer, chat_id=placeholder_message.chat_id, message_id=placeholder_message.message_id, parse_mode=parse_mode)
+                    await context.bot.edit_message_text(telegram_format.render(answer), chat_id=placeholder_message.chat_id, message_id=placeholder_message.message_id, parse_mode=parse_mode)
                 except telegram.error.BadRequest as e:
                     if str(e).startswith("Message is not modified"):
                         continue
@@ -490,14 +488,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
     async with user_semaphores[user_id]:
-        # if current_model == "gpt-4-vision-preview" or current_model == "gpt-4o" or update.message.photo is not None and len(update.message.photo) > 0:
-        if (current_model == "gpt-4-vision-preview" or current_model == "gpt-4o") and update.message.photo is not None and len(update.message.photo) > 0:
-            logger.error(current_model)
-            # What is this? ^^^
-
-            if current_model != "gpt-4o" and current_model != "gpt-4-vision-preview":
-                current_model = "gpt-4o"
-                db.set_user_attribute(user_id, "current_model", "gpt-4o")
+        if openai_utils.is_vision_model(current_model) and update.message.photo is not None and len(update.message.photo) > 0:
+            if not openai_utils.is_vision_model(current_model):
+                current_model = "gpt-5.5"
+                db.set_user_attribute(user_id, "current_model", "gpt-5.5")
             task = asyncio.create_task(
                 _vision_message_handle_fn(update, context, use_new_dialog_timeout=use_new_dialog_timeout)
             )
@@ -582,8 +576,8 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
 
     try:
         image_urls = await openai_utils.generate_images(message, n_images=config.return_n_generated_images, size=config.image_size)
-    except openai.error.InvalidRequestError as e:
-        if str(e).startswith("Your request was rejected as a result of our safety system"):
+    except openai.BadRequestError as e:
+        if "safety system" in str(e):
             text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh?"
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
             return
@@ -607,7 +601,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     if await is_previous_message_not_answered_yet(update, context): return
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.set_user_attribute(user_id, "current_model", "gpt-4o")
+    db.set_user_attribute(user_id, "current_model", "gpt-5.5")
 
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
@@ -751,7 +745,11 @@ def get_settings_menu(user_id: int):
         buttons.append(
             InlineKeyboardButton(title, callback_data=f"set_settings|{model_key}")
         )
-    reply_markup = InlineKeyboardMarkup([buttons])
+
+    # split into rows of 2 so long model names don't get truncated
+    n_cols = 2
+    rows = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
+    reply_markup = InlineKeyboardMarkup(rows)
 
     return text, reply_markup
 

@@ -1,6 +1,58 @@
-available_text_models: ["gpt-4o"]
+available_text_models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4o", "gpt-4o-mini"]
 
 info:
+  gpt-5.5:
+    type: chat_completion
+    name: GPT-5.5
+    description: GPT-5.5 is the <b>newest and smartest</b> flagship model (released 2026). Huge 1M-token context, native <b>vision</b>, and best-in-class reasoning. The default choice for any serious task.
+
+    price_per_1000_input_tokens: 0.005
+    price_per_1000_output_tokens: 0.03
+
+    scores:
+      smart: 5
+      fast: 4
+      cheap: 2
+
+  gpt-5.4:
+    type: chat_completion
+    name: GPT-5.4
+    description: GPT-5.4 is a <b>cheaper</b> flagship model that is still extremely capable. Great balance of intelligence, speed and price. Supports <b>vision</b>.
+
+    price_per_1000_input_tokens: 0.0025
+    price_per_1000_output_tokens: 0.015
+
+    scores:
+      smart: 5
+      fast: 4
+      cheap: 3
+
+  gpt-5.4-mini:
+    type: chat_completion
+    name: GPT-5.4 Mini
+    description: GPT-5.4 Mini is a <b>fast and affordable</b> model for everyday tasks. Much smarter than the old GPT-3.5/4o-mini at a similar price. Supports <b>vision</b>.
+
+    price_per_1000_input_tokens: 0.00075
+    price_per_1000_output_tokens: 0.0045
+
+    scores:
+      smart: 4
+      fast: 5
+      cheap: 4
+
+  gpt-5.4-nano:
+    type: chat_completion
+    name: GPT-5.4 Nano
+    description: GPT-5.4 Nano is the <b>cheapest and fastest</b> model. Ideal for lightweight, high-volume tasks where cost matters most. Supports <b>vision</b>.
+
+    price_per_1000_input_tokens: 0.0002
+    price_per_1000_output_tokens: 0.00125
+
+    scores:
+      smart: 3
+      fast: 5
+      cheap: 5
+
   gpt-3.5-turbo:
     type: chat_completion
     name: ChatGPT
