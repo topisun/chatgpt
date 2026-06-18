@@ -74,6 +74,20 @@ def is_vision_model(model):
     return model in VISION_MODELS
 
 
+def is_context_length_error(e):
+    """True only for "prompt too long" errors.
+
+    The dialog-shortening retry loop must trigger ONLY on real context-overflow
+    errors. Every other BadRequest (malformed payload, bad param, etc.) must
+    propagate so it's visible instead of silently eating the whole conversation.
+    """
+    code = getattr(e, "code", None)
+    if code == "context_length_exceeded":
+        return True
+    msg = str(getattr(e, "message", "") or e).lower()
+    return "context length" in msg or "maximum context" in msg or "too many tokens" in msg
+
+
 class ChatGPT:
     def __init__(self, model="gpt-5.5"):
         assert model in SUPPORTED_MODELS, f"Unknown model: {model}"
@@ -101,6 +115,8 @@ class ChatGPT:
                 answer += self._format_sources(r)
                 n_input_tokens, n_output_tokens = r.usage.input_tokens, r.usage.output_tokens
             except openai.BadRequestError as e:  # too many tokens
+                if not is_context_length_error(e):
+                    raise  # not a context-overflow error — surface it, don't eat the dialog
                 if len(dialog_messages) == 0:
                     raise ValueError("Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
 
@@ -152,6 +168,8 @@ class ChatGPT:
                         n_output_tokens = final_response.usage.output_tokens
 
             except openai.BadRequestError as e:  # too many tokens
+                if not is_context_length_error(e):
+                    raise  # not a context-overflow error — surface it, don't eat the dialog
                 if len(dialog_messages) == 0:
                     raise e
 
@@ -194,6 +212,8 @@ class ChatGPT:
                     r.usage.output_tokens,
                 )
             except openai.BadRequestError as e:  # too many tokens
+                if not is_context_length_error(e):
+                    raise  # not a context-overflow error — surface it, don't eat the dialog
                 if len(dialog_messages) == 0:
                     raise ValueError(
                         "Dialog messages is reduced to zero, but still has too many tokens to make completion"
@@ -267,6 +287,8 @@ class ChatGPT:
                         n_output_tokens = final_response.usage.output_tokens
 
             except openai.BadRequestError as e:  # too many tokens
+                if not is_context_length_error(e):
+                    raise  # not a context-overflow error — surface it, don't eat the dialog
                 if len(dialog_messages) == 0:
                     raise e
                 # forget first message in dialog_messages
@@ -298,6 +320,31 @@ class ChatGPT:
     def _encode_image(self, image_buffer: BytesIO) -> bytes:
         return base64.b64encode(image_buffer.read()).decode("utf-8")
 
+    def _normalize_user_content(self, content):
+        """Convert persisted dialog history into Responses API input content.
+
+        History is stored (bot.py) as Chat-Completions-style blocks:
+        ``{"type": "text", "text": ...}`` / ``{"type": "image", "image": <base64>}``.
+        The Responses API rejects those — user content must use ``input_text`` /
+        ``input_image`` blocks (a plain string is also fine and passes through).
+        Without this conversion every turn with history 400s, which the retry
+        loop misreads as "too long" and drops the whole conversation.
+        """
+        if isinstance(content, str):
+            return content
+
+        normalized = []
+        for block in content:
+            block_type = block.get("type")
+            if block_type in ("text", "input_text"):
+                normalized.append({"type": "input_text", "text": block.get("text", "")})
+            elif block_type in ("image", "input_image"):
+                image = block.get("image") or block.get("image_url")
+                if isinstance(image, str) and not image.startswith("data:"):
+                    image = f"data:image/jpeg;base64,{image}"
+                normalized.append({"type": "input_image", "image_url": image, "detail": "high"})
+        return normalized
+
     def _generate_input(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
         """Build (instructions, input) for the Responses API.
 
@@ -309,7 +356,7 @@ class ChatGPT:
 
         input_items = []
         for dialog_message in dialog_messages:
-            input_items.append({"role": "user", "content": dialog_message["user"]})
+            input_items.append({"role": "user", "content": self._normalize_user_content(dialog_message["user"])})
             input_items.append({"role": "assistant", "content": dialog_message["bot"]})
 
         if image_buffer is not None:

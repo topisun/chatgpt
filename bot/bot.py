@@ -294,6 +294,10 @@ async def _vision_message_handle_fn(
 
             answer = answer[:4096]  # telegram message limit
 
+            # never try to render/send an empty message (Telegram 400s on it)
+            if status == "finished" and not answer.strip():
+                answer = "🤔 Пустой ответ от модели. Попробуйте /retry или переформулируйте."
+
             # update only when 100 new symbols are ready
             if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
                 continue
@@ -440,7 +444,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 status, answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed = gen_item
 
                 answer = answer[:4096]  # telegram message limit
-                    
+
+                # never try to render/send an empty message (Telegram 400s on it)
+                if status == "finished" and not answer.strip():
+                    answer = "🤔 Пустой ответ от модели. Попробуйте /retry или переформулируйте."
+
                 # update only when 100 new symbols are ready
                 if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
                     continue
