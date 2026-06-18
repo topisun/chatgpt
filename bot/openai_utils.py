@@ -462,10 +462,27 @@ async def transcribe_audio(audio_file) -> str:
     return r.text or ""
 
 
-async def generate_images(prompt, n_images=4, size="512x512"):
-    r = await client.images.generate(model="dall-e-2", prompt=prompt, n=n_images, size=size)
-    image_urls = [item.url for item in r.data]
-    return image_urls
+# Latest available image model. gpt-image-1 always returns base64 (no URLs) and
+# only accepts these sizes (plus "auto"); anything else 400s.
+IMAGE_MODEL = "gpt-image-1"
+IMAGE_SIZES = {"1024x1024", "1024x1536", "1536x1024", "auto"}
+IMAGE_QUALITIES = {"low", "medium", "high", "auto"}
+
+
+async def generate_images(prompt, n_images=1, size="1024x1024", quality="medium"):
+    """Generate images with gpt-image-1 and return them as raw PNG bytes.
+
+    Returns a list of `bytes` (decoded base64) rather than URLs, because
+    gpt-image-1 only ever returns b64_json.
+    """
+    if size not in IMAGE_SIZES:
+        size = "1024x1024"
+    if quality not in IMAGE_QUALITIES:
+        quality = "medium"
+    r = await client.images.generate(
+        model=IMAGE_MODEL, prompt=prompt, n=n_images, size=size, quality=quality
+    )
+    return [base64.b64decode(item.b64_json) for item in r.data]
 
 
 async def is_content_acceptable(prompt):

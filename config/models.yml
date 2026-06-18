@@ -159,6 +159,10 @@ info:
      type: image
      price_per_1_image: 0.018  # 512x512
 
+  gpt-image-1:
+     type: image
+     price_per_1_image: 0.042  # approx for 1024x1024 medium quality
+
   whisper:
     type: audio
     price_per_1_min: 0.006

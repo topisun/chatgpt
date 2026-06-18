@@ -44,12 +44,13 @@ user_tasks = {}
 HELP_MESSAGE = """Commands:
 ⚪ /retry – Regenerate last bot answer
 ⚪ /new – Start new dialog
+⚪ /image – Generate an image from text
 ⚪ /mode – Select chat mode
 ⚪ /settings – Show settings
 ⚪ /balance – Show balance
 ⚪ /help – Show help
 
-🎨 Generate images from text prompts in <b>👩‍🎨 Artist</b> /mode
+🎨 Generate images: send <b>/image &lt;prompt&gt;</b> in any chat, or switch to <b>🎨 Image Generator</b> /mode
 👥 Add bot to <b>group chat</b>: /help_group_chat
 🎤 You can send <b>Voice Messages</b> instead of text
 """
@@ -98,6 +99,10 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
 
     if user.id not in user_semaphores:
         user_semaphores[user.id] = asyncio.Semaphore(1)
+
+    # migrate legacy "artist" chat mode -> "image_generator"
+    if db.get_user_attribute(user.id, "current_chat_mode") == "artist":
+        db.set_user_attribute(user.id, "current_chat_mode", "image_generator")
 
     if db.get_user_attribute(user.id, "current_model") is None:
         db.set_user_attribute(user.id, "current_model", config.models["available_text_models"][0])
@@ -391,7 +396,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
-    if chat_mode == "artist":
+    if chat_mode == "image_generator":
         await generate_image_handle(update, context, message=message)
         return
 
@@ -581,11 +586,23 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
     await update.message.chat.send_action(action="upload_photo")
 
     message = message or update.message.text
+    if not message or not message.strip():
+        await update.message.reply_text(
+            "🎨 Опиши, что нарисовать. Например: <i>рыжий кот в очках, иллюстрация</i>\n"
+            "Или используй команду: <code>/image рыжий кот в очках</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
     try:
-        image_urls = await openai_utils.generate_images(message, n_images=config.return_n_generated_images, size=config.image_size)
+        images = await openai_utils.generate_images(
+            message,
+            n_images=config.return_n_generated_images,
+            size=config.image_size,
+            quality=config.image_quality,
+        )
     except openai.BadRequestError as e:
-        if "safety system" in str(e):
+        if "safety system" in str(e) or "moderation_blocked" in str(e):
             text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh?"
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
             return
@@ -595,9 +612,24 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
     # token usage
     db.set_user_attribute(user_id, "n_generated_images", config.return_n_generated_images + db.get_user_attribute(user_id, "n_generated_images"))
 
-    for i, image_url in enumerate(image_urls):
+    # gpt-image-1 returns raw bytes (base64-decoded), not URLs
+    for image_bytes in images:
         await update.message.chat.send_action(action="upload_photo")
-        await update.message.reply_photo(image_url, parse_mode=ParseMode.HTML)
+        await update.message.reply_photo(io.BytesIO(image_bytes))
+
+
+async def image_command_handle(update: Update, context: CallbackContext):
+    """`/image <prompt>` — generate an image in any chat mode (not only Image Generator)."""
+    # prompt is everything after the command
+    prompt = (update.message.text or "").partition(" ")[2].strip()
+    if not prompt:
+        await update.message.reply_text(
+            "🎨 Использование: <code>/image описание картинки</code>\n"
+            "Например: <code>/image рыжий кот в очках, иллюстрация</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    await generate_image_handle(update, context, message=prompt)
 
 
 async def new_dialog_handle(update: Update, context: CallbackContext):
@@ -827,9 +859,9 @@ async def show_balance_handle(update: Update, context: CallbackContext):
         details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}$</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
 
     # image generation
-    image_generation_n_spent_dollars = config.models["info"]["dalle-2"]["price_per_1_image"] * n_generated_images
+    image_generation_n_spent_dollars = config.models["info"]["gpt-image-1"]["price_per_1_image"] * n_generated_images
     if n_generated_images != 0:
-        details_text += f"- DALL·E 2 (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} generated images</b>\n"
+        details_text += f"- gpt-image-1 (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} generated images</b>\n"
 
     total_n_spent_dollars += image_generation_n_spent_dollars
 
@@ -886,6 +918,7 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
 async def post_init(application: Application):
     await application.bot.set_my_commands([
         BotCommand("/new", "Start new dialog"),
+        BotCommand("/image", "Generate an image from text"),
         BotCommand("/mode", "Select chat mode"),
         BotCommand("/retry", "Re-generate response for previous query"),
         BotCommand("/balance", "Show balance"),
@@ -923,6 +956,7 @@ def run_bot() -> None:
     application.add_handler(MessageHandler(filters.VIDEO & ~filters.COMMAND & user_filter, unsupport_message_handle))
     application.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND & user_filter, unsupport_message_handle))
     application.add_handler(CommandHandler("retry", retry_handle, filters=user_filter))
+    application.add_handler(CommandHandler("image", image_command_handle, filters=user_filter))
     application.add_handler(CommandHandler("new", new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", cancel_handle, filters=user_filter))
 

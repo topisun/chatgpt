@@ -254,6 +254,16 @@ class LiveOpenAITest(unittest.IsolatedAsyncioTestCase):
         if "Источники" not in answer:
             self.skipTest("model answered without url_citation annotations this run")
 
+    async def test_image_generation_returns_png_bytes(self):
+        """Health check for image generation: gpt-image-1 must return real PNG bytes."""
+        images = await self.ou.generate_images(
+            "a small red circle on a white background",
+            n_images=1, size="1024x1024", quality="low",
+        )
+        self.assertEqual(len(images), 1)
+        self.assertIsInstance(images[0], (bytes, bytearray))
+        self.assertTrue(bytes(images[0]).startswith(b"\x89PNG"), "not a PNG image")
+
 
 class DialogHistoryInputTest(unittest.IsolatedAsyncioTestCase):
     """Regression for the "doesn't hold a conversation" bug.
@@ -344,6 +354,38 @@ class BadRequestHandlingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "ok")
         self.assertEqual(removed, 1)
         self.assertEqual(create.call_count, 2)
+
+
+class GenerateImagesTest(unittest.IsolatedAsyncioTestCase):
+    """Image generation uses gpt-image-1 and returns decoded PNG bytes (no URLs)."""
+
+    def _fake_images_response(self, b64_list):
+        data = [types.SimpleNamespace(b64_json=b) for b in b64_list]
+        return types.SimpleNamespace(data=data)
+
+    async def _call(self, **kwargs):
+        import base64
+        png = base64.b64encode(b"\x89PNG-fake").decode()
+        create = mock.AsyncMock(return_value=self._fake_images_response([png]))
+        with mock.patch.object(openai_utils.client.images, "generate", new=create):
+            result = await openai_utils.generate_images("a cat", **kwargs)
+        return create.call_args.kwargs, result
+
+    async def test_uses_gpt_image_1_and_decodes_bytes(self):
+        kwargs, result = await self._call()
+        self.assertEqual(kwargs["model"], "gpt-image-1")
+        self.assertEqual(result, [b"\x89PNG-fake"])
+
+    async def test_invalid_size_and_quality_are_coerced(self):
+        # gpt-image-1 would 400 on dall-e sizes; we must never forward them.
+        kwargs, _ = await self._call(size="512x512", quality="ultra")
+        self.assertIn(kwargs["size"], openai_utils.IMAGE_SIZES)
+        self.assertIn(kwargs["quality"], openai_utils.IMAGE_QUALITIES)
+
+    async def test_valid_size_and_quality_pass_through(self):
+        kwargs, _ = await self._call(size="1536x1024", quality="high")
+        self.assertEqual(kwargs["size"], "1536x1024")
+        self.assertEqual(kwargs["quality"], "high")
 
 
 class UnknownModelTest(unittest.TestCase):
