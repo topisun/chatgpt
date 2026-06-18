@@ -264,6 +264,18 @@ class LiveOpenAITest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(images[0], (bytes, bytearray))
         self.assertTrue(bytes(images[0]).startswith(b"\x89PNG"), "not a PNG image")
 
+    async def test_image_editing_returns_png_bytes(self):
+        """Health check for image editing (translate/replace text on a photo)."""
+        base = (await self.ou.generate_images(
+            "a poster with a big bold caption that says HELLO, plain background",
+            n_images=1, size="1024x1024", quality="low"))[0]
+        edited = await self.ou.edit_image(
+            base, "Replace the caption text with 'ПРИВЕТ', keep the same style.",
+            size="auto", quality="low",
+        )
+        self.assertEqual(len(edited), 1)
+        self.assertTrue(bytes(edited[0]).startswith(b"\x89PNG"), "not a PNG image")
+
 
 class DialogHistoryInputTest(unittest.IsolatedAsyncioTestCase):
     """Regression for the "doesn't hold a conversation" bug.
@@ -386,6 +398,37 @@ class GenerateImagesTest(unittest.IsolatedAsyncioTestCase):
         kwargs, _ = await self._call(size="1536x1024", quality="high")
         self.assertEqual(kwargs["size"], "1536x1024")
         self.assertEqual(kwargs["quality"], "high")
+
+
+class EditImageTest(unittest.IsolatedAsyncioTestCase):
+    """Image editing (translate/replace text) uses gpt-image-1 images.edit."""
+
+    def _fake_images_response(self, b64_list):
+        data = [types.SimpleNamespace(b64_json=b) for b in b64_list]
+        return types.SimpleNamespace(data=data)
+
+    async def _call(self, **kwargs):
+        import base64
+        png = base64.b64encode(b"\x89PNG-edited").decode()
+        edit = mock.AsyncMock(return_value=self._fake_images_response([png]))
+        with mock.patch.object(openai_utils.client.images, "edit", new=edit):
+            result = await openai_utils.edit_image(b"\x89PNG-source", "translate", **kwargs)
+        return edit.call_args.kwargs, result
+
+    async def test_uses_gpt_image_1_and_decodes_bytes(self):
+        kwargs, result = await self._call()
+        self.assertEqual(kwargs["model"], "gpt-image-1")
+        self.assertEqual(result, [b"\x89PNG-edited"])
+
+    async def test_source_image_is_passed_with_a_filename(self):
+        kwargs, _ = await self._call()
+        # SDK needs a name on the file-like object to infer the mime type
+        self.assertTrue(getattr(kwargs["image"], "name", None))
+
+    async def test_invalid_size_and_quality_are_coerced(self):
+        kwargs, _ = await self._call(size="512x512", quality="ultra")
+        self.assertIn(kwargs["size"], openai_utils.IMAGE_SIZES)
+        self.assertIn(kwargs["quality"], openai_utils.IMAGE_QUALITIES)
 
 
 class UnknownModelTest(unittest.TestCase):

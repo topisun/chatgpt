@@ -387,7 +387,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     _message = message or update.message.text
 
     # remove bot mention (in group chats)
-    if update.message.chat.type != "private":
+    if update.message.chat.type != "private" and _message:
         _message = _message.replace("@" + context.bot.username, "").strip()
 
     await register_user_if_not_exists(update, context, update.message.from_user)
@@ -395,6 +395,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
+
+    # photo + caption -> edit the image (translate/replace text, keep style)
+    if update.message.photo and update.message.caption:
+        await edit_image_handle(update, context)
+        return
 
     if chat_mode == "image_generator":
         await generate_image_handle(update, context, message=message)
@@ -616,6 +621,82 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
     for image_bytes in images:
         await update.message.chat.send_action(action="upload_photo")
         await update.message.reply_photo(io.BytesIO(image_bytes))
+
+
+async def edit_image_handle(update: Update, context: CallbackContext):
+    """Edit a user-sent photo per its caption (e.g. translate/replace captions).
+
+    Triggered for any photo that has a caption, in any chat mode. Uses
+    gpt-image-1 image editing, preserving the original style/layout.
+    """
+    user_id = update.message.from_user.id
+    if not await is_user_in_allowed_groups(context, user_id):
+        await update.message.reply_text("Sorry, you are not allowed to use this bot.")
+        return
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    if await is_previous_message_not_answered_yet(update, context): return
+
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    caption = (update.message.caption or "").strip()
+    if not caption:
+        await update.message.reply_text(
+            "✍️ Добавь к фото подпись с инструкцией — что изменить.\n"
+            "Например: <i>переведи все надписи на русский, остальное не трогай</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # download the largest available photo into memory
+    photo = update.message.photo[-1]
+    photo_file = await context.bot.get_file(photo.file_id)
+    buf = io.BytesIO()
+    await photo_file.download_to_memory(buf)
+    image_bytes = buf.getvalue()
+
+    placeholder_message = await update.message.reply_text("🎨 Редактирую изображение…")
+    await update.message.chat.send_action(action="upload_photo")
+
+    prompt = (
+        "Edit the provided image according to the following instruction. "
+        "Keep the original composition, style, colors, objects, framing and "
+        "layout unchanged unless the instruction explicitly asks to change "
+        f"them:\n{caption}"
+    )
+
+    try:
+        images = await openai_utils.edit_image(
+            image_bytes, prompt, size="auto", quality=config.image_quality
+        )
+    except openai.BadRequestError as e:
+        if "safety system" in str(e) or "moderation_blocked" in str(e):
+            await update.message.reply_text(
+                "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        raise
+    except Exception as e:
+        error_text = f"Something went wrong during image editing. Reason: {e}"
+        logger.error(error_text)
+        await update.message.reply_text(error_text)
+        return
+
+    db.set_user_attribute(
+        user_id, "n_generated_images",
+        len(images) + db.get_user_attribute(user_id, "n_generated_images"),
+    )
+
+    for image in images:
+        await update.message.chat.send_action(action="upload_photo")
+        await update.message.reply_photo(io.BytesIO(image))
+
+    try:
+        await context.bot.delete_message(
+            placeholder_message.chat_id, placeholder_message.message_id
+        )
+    except Exception:
+        pass
 
 
 async def image_command_handle(update: Update, context: CallbackContext):

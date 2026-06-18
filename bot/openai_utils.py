@@ -485,6 +485,25 @@ async def generate_images(prompt, n_images=1, size="1024x1024", quality="medium"
     return [base64.b64decode(item.b64_json) for item in r.data]
 
 
+async def edit_image(image_bytes, prompt, size="auto", quality="medium"):
+    """Edit an existing image with gpt-image-1 and return raw PNG bytes.
+
+    Used to modify a user-supplied image (e.g. translate/replace the captions
+    while keeping the original style and layout). `size="auto"` lets the model
+    preserve the source aspect ratio. Returns a list of `bytes`.
+    """
+    if size not in IMAGE_SIZES:
+        size = "auto"
+    if quality not in IMAGE_QUALITIES:
+        quality = "medium"
+    buf = BytesIO(image_bytes)
+    buf.name = "image.png"  # the SDK needs a filename to infer the mime type
+    r = await client.images.edit(
+        model=IMAGE_MODEL, image=buf, prompt=prompt, size=size, quality=quality
+    )
+    return [base64.b64decode(item.b64_json) for item in r.data]
+
+
 async def is_content_acceptable(prompt):
     r = await client.moderations.create(input=prompt)
     categories = r.results[0].categories
