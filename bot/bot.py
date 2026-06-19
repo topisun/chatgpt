@@ -396,8 +396,9 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
-    # photo + caption -> edit the image (translate/replace text, keep style)
-    if update.message.photo and update.message.caption:
+    # Image Editor mode: edit photos instead of analyzing/chatting.
+    # The photo and the instruction may arrive in the same message or separately.
+    if chat_mode == "image_editor":
         await edit_image_handle(update, context)
         return
 
@@ -624,10 +625,12 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
 
 
 async def edit_image_handle(update: Update, context: CallbackContext):
-    """Edit a user-sent photo per its caption (e.g. translate/replace captions).
+    """Edit a user-sent photo per an instruction (e.g. recolor, translate captions).
 
-    Triggered for any photo that has a caption, in any chat mode. Uses
-    gpt-image-1 image editing, preserving the original style/layout.
+    Used in the Image Editor chat mode. The photo and the instruction may arrive
+    in one message (photo + caption) or in separate messages: a photo is
+    remembered, and the next text message is applied to it. Uses gpt-image-1
+    image editing, preserving the original style/layout.
     """
     user_id = update.message.from_user.id
     if not await is_user_in_allowed_groups(context, user_id):
@@ -638,18 +641,34 @@ async def edit_image_handle(update: Update, context: CallbackContext):
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    caption = (update.message.caption or "").strip()
-    if not caption:
-        await update.message.reply_text(
-            "✍️ Добавь к фото подпись с инструкцией — что изменить.\n"
-            "Например: <i>переведи все надписи на русский, остальное не трогай</i>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
+    # instruction may come from a photo's caption or from a plain text message
+    instruction = (update.message.caption or update.message.text or "").strip()
 
-    # download the largest available photo into memory
-    photo = update.message.photo[-1]
-    photo_file = await context.bot.get_file(photo.file_id)
+    if update.message.photo:
+        # remember this photo so follow-up text messages can edit it
+        file_id = update.message.photo[-1].file_id
+        db.set_user_attribute(user_id, "last_edit_photo_file_id", file_id)
+        if not instruction:
+            await update.message.reply_text(
+                "🖌 Фото получил. Теперь напиши, что изменить — отдельным сообщением.\n"
+                "Например: <i>замени красный цвет на синий, текст не трогай</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+    else:
+        # text-only message: edit the last photo the user sent
+        file_id = db.get_user_attribute(user_id, "last_edit_photo_file_id")
+        if not file_id:
+            await update.message.reply_text(
+                "🖼 Сначала пришли фото, потом напиши, что на нём изменить.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        if not instruction:
+            return
+
+    # download the chosen photo into memory
+    photo_file = await context.bot.get_file(file_id)
     buf = io.BytesIO()
     await photo_file.download_to_memory(buf)
     image_bytes = buf.getvalue()
@@ -658,10 +677,13 @@ async def edit_image_handle(update: Update, context: CallbackContext):
     await update.message.chat.send_action(action="upload_photo")
 
     prompt = (
-        "Edit the provided image according to the following instruction. "
-        "Keep the original composition, style, colors, objects, framing and "
-        "layout unchanged unless the instruction explicitly asks to change "
-        f"them:\n{caption}"
+        "Edit the provided image strictly according to the instruction below, "
+        "changing ONLY what it explicitly asks for. Everything else must stay "
+        "pixel-identical to the original: keep all text and its exact wording, "
+        "fonts, layout, composition, objects, framing and colors unchanged. "
+        "In particular, never rewrite, translate, restyle or re-render any text "
+        "unless the instruction explicitly asks for it.\n"
+        f"Instruction: {instruction}"
     )
 
     try:

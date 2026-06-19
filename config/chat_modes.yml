@@ -37,6 +37,10 @@ image_generator:
   name: 🎨 Image Generator
   welcome_message: 🎨 Hi, I'm <b>Image Generator</b>. Describe any picture and I'll generate it (e.g. <i>Ginger cat selfie on Times Square, illustration</i>). You can also use /image &lt;prompt&gt; in any chat.
 
+image_editor:
+  name: 🖌 Image Editor
+  welcome_message: 🖌 Hi, I'm <b>Image Editor</b>. Send a photo with a caption telling me what to change and I'll edit it, keeping the original style (e.g. <i>translate all captions to Russian, leave the rest unchanged</i>).
+
 english_tutor:
   name: 🇬🇧 English Tutor
   welcome_message: 🇬🇧 Hi, I'm <b>English Tutor</b>. How can I help you?

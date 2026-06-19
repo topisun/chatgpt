@@ -21,7 +21,13 @@ OPENAI_COMPLETION_OPTIONS = {
     "timeout": 60.0,
 }
 
-MAX_OUTPUT_TOKENS = 1000
+# Cap on visible answer length for classic chat models.
+MAX_OUTPUT_TOKENS = 2000
+
+# Reasoning models (GPT-5.x) spend this budget on internal reasoning AND the
+# visible answer combined. A small cap gets fully consumed by reasoning, leaving
+# an EMPTY output_text (response status "incomplete"). Give them ample headroom.
+REASONING_MAX_OUTPUT_TOKENS = 16000
 
 # Web search tool. The model decides on its own when to actually search, so we
 # attach it to every request (all chat modes) — mirrors the ChatGPT app.
@@ -44,7 +50,7 @@ def build_completion_options(model):
     """
     if model in REASONING_MODELS:
         return {
-            "max_output_tokens": MAX_OUTPUT_TOKENS,
+            "max_output_tokens": REASONING_MAX_OUTPUT_TOKENS,
             "timeout": OPENAI_COMPLETION_OPTIONS["timeout"],
         }
 
@@ -377,7 +383,9 @@ class ChatGPT:
                 }
             )
         else:
-            input_items.append({"role": "user", "content": message})
+            # message may be a plain string or, on /retry, persisted history
+            # blocks ({"type": "text"/"image"}) — normalize to Responses content
+            input_items.append({"role": "user", "content": self._normalize_user_content(message)})
 
         return instructions, input_items
 
