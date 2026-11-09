@@ -1037,6 +1037,11 @@ def run_bot() -> None:
         .rate_limiter(AIORateLimiter(max_retries=5))
         .http_version("1.1")
         .get_updates_http_version("1.1")
+        # default read timeout is 5s; getFile on a just-uploaded photo often takes longer
+        .connect_timeout(15)
+        .read_timeout(60)
+        .write_timeout(60)
+        .pool_timeout(15)
         .post_init(post_init)
         .build()
     )
